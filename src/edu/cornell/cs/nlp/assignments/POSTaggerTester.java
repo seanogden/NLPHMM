@@ -115,12 +115,22 @@ public class POSTaggerTester {
 				basePath, 2300, 2399);
 		System.out.println("done.");
 
+		final LocalTrigramScorer localTrigramScorer;
+		final TrellisDecoder<State> trellisDecoder;
+
 		// Construct tagger components
-		// TODO : improve on the MostFrequentTagScorer
-		final LocalTrigramScorer localTrigramScorer = new MostFrequentTagScorer(
-				false);
-		// TODO : improve on the GreedyDecoder
-		final TrellisDecoder<State> trellisDecoder = new GreedyDecoder<State>();
+		if (argMap.containsKey("-hmm")){
+			localTrigramScorer = new HMMScorer(false);
+		} else {
+			localTrigramScorer = new MostFrequentTagScorer(false);
+		}
+
+		if (argMap.containsKey("-viterbi")){
+			trellisDecoder = new ViterbiDecoder<State>();
+		} else {
+			trellisDecoder = new GreedyDecoder<State>();
+		}
+
 
 		// Train tagger
 		final POSTagger posTagger = new POSTagger(localTrigramScorer,
@@ -281,6 +291,24 @@ public class POSTaggerTester {
 		}
 	}
 
+	static class ViterbiDecoder<S> implements TrellisDecoder<S> {
+
+		@Override
+		public List<S> getBestPath(Trellis<S> trellis) {
+			final List<S> states = new ArrayList<S>();
+			S currentState = trellis.getStartState();
+			states.add(currentState);
+			while (!currentState.equals(trellis.getEndState())) {
+				final Counter<S> transitions = trellis
+						.getForwardTransitions(currentState);
+				final S nextState = transitions.argMax();
+				states.add(nextState);
+				currentState = nextState;
+			}
+			return states;
+		}			//TODO: IMPLEMENT ME
+	}
+
 	/**
 	 * A LabeledLocalTrigramContext is a context plus the correct tag for that
 	 * position -- basically a LabeledFeatureVector
@@ -371,6 +399,113 @@ public class POSTaggerTester {
 		void train(List<LabeledLocalTrigramContext> localTrigramContexts);
 
 		void validate(List<LabeledLocalTrigramContext> localTrigramContexts);
+	}
+
+	/**
+	 * The MostFrequentTagScorer gives each test word the tag it was seen with
+	 * most often in training (or the tag with the most seen word types if the
+	 * test word is unseen in training. This scorer actually does a little more
+	 * than its name claims -- if constructed with restrictTrigrams = true, it
+	 * will forbid illegal tag trigrams, otherwise it makes no use of tag
+	 * history
+	 * information whatsoever.
+	 */
+	static class HMMScorer implements LocalTrigramScorer {
+		//TODO: Implement the actual HMM Scorer
+
+		boolean						restrictTrigrams;									// if
+																						// true,
+																						// assign
+																						// log
+																						// score
+																						// of
+																						// Double.NEGATIVE_INFINITY
+																						// to
+																						// illegal
+																						// tag
+																						// trigrams.
+
+		Set<String>					seenTagTrigrams	= new HashSet<String>();
+		Counter<String>				unknownWordTags	= new Counter<String>();
+		CounterMap<String, String>	wordsToTags		= new CounterMap<String, String>();
+
+		public HMMScorer(boolean restrictTrigrams) {
+			this.restrictTrigrams = restrictTrigrams;
+		}
+
+		private static String makeTrigramString(String previousPreviousTag,
+				String previousTag, String currentTag) {
+			return previousPreviousTag + " " + previousTag + " " + currentTag;
+		}
+
+		public int getHistorySize() {
+			return 2;
+		}
+
+		@Override
+		public Counter<String> getLogScoreCounter(
+				LocalTrigramContext localTrigramContext) {
+			final int position = localTrigramContext.getPosition();
+			final String word = localTrigramContext.getWords().get(position);
+			Counter<String> tagCounter = unknownWordTags;
+			if (wordsToTags.keySet().contains(word)) {
+				tagCounter = wordsToTags.getCounter(word);
+			}
+			final Set<String> allowedFollowingTags = allowedFollowingTags(
+					tagCounter.keySet(),
+					localTrigramContext.getPreviousPreviousTag(),
+					localTrigramContext.getPreviousTag());
+			final Counter<String> logScoreCounter = new Counter<String>();
+			for (final String tag : tagCounter.keySet()) {
+				final double logScore = Math.log(tagCounter.getCount(tag));
+				if (!restrictTrigrams || allowedFollowingTags.isEmpty()
+						|| allowedFollowingTags.contains(tag)) {
+					logScoreCounter.setCount(tag, logScore);
+				}
+			}
+			return logScoreCounter;
+		}
+
+		@Override
+		public void train(
+				List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
+			// collect word-tag counts
+			for (final LabeledLocalTrigramContext labeledLocalTrigramContext : labeledLocalTrigramContexts) {
+				final String word = labeledLocalTrigramContext.getCurrentWord();
+				final String tag = labeledLocalTrigramContext.getCurrentTag();
+				if (!wordsToTags.keySet().contains(word)) {
+					// word is currently unknown, so tally its tag in the
+					// unknown tag counter
+					unknownWordTags.incrementCount(tag, 1.0);
+				}
+				wordsToTags.incrementCount(word, tag, 1.0);
+				seenTagTrigrams.add(makeTrigramString(
+						labeledLocalTrigramContext.getPreviousPreviousTag(),
+						labeledLocalTrigramContext.getPreviousTag(),
+						labeledLocalTrigramContext.getCurrentTag()));
+			}
+			wordsToTags = Counters.conditionalNormalize(wordsToTags);
+			unknownWordTags = Counters.normalize(unknownWordTags);
+		}
+
+		@Override
+		public void validate(
+				List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
+			// no tuning for this dummy model!
+		}
+
+		private Set<String> allowedFollowingTags(Set<String> tags,
+				String previousPreviousTag, String previousTag) {
+			final Set<String> allowedTags = new HashSet<String>();
+			for (final String tag : tags) {
+				final String trigramString = makeTrigramString(
+						previousPreviousTag, previousTag, tag);
+				if (seenTagTrigrams.contains(trigramString)) {
+					allowedTags.add(tag);
+				}
+			}
+			return allowedTags;
+		}
 	}
 
 	/**
