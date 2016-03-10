@@ -125,6 +125,9 @@ public class POSTaggerTester {
 			trellisDecoder = new GreedyDecoder<State>();
 		}
 
+		if (argMap.containsKey("-debug")) {
+			LogLevel.setLogLevel(LogLevel.DEBUG);
+		}
 
 		// Train tagger
 		final POSTagger posTagger = new POSTagger(localTrigramScorer,
@@ -289,7 +292,6 @@ public class POSTaggerTester {
 
 		@Override
 		public List<S> getBestPath(Trellis<S> trellis) {
-			final boolean debug = false;
 			final List<Counter<S>> states = new ArrayList<Counter<S>>();
 			final List<HashMap<S, S>> backpointers= new ArrayList<HashMap<S, S>>();
 
@@ -304,11 +306,10 @@ public class POSTaggerTester {
 			states.add(s1);
 			backpointers.add(b1);
 
-			if (debug) {
-				System.out.println("Start State: " + startstate.toString());
-				System.out.println("End State: " + endstate.toString());
-				System.out.println("Forward transitions: " + s1.toString());
-			}
+
+		    LOG.debug("Start State: " + startstate.toString());
+			LOG.debug("End State: " + endstate.toString());
+			LOG.debug("Forward transitions: " + s1.toString());
 
 
 			for (S k : s1.keySet()) {
@@ -327,30 +328,25 @@ public class POSTaggerTester {
 				for (S state : s0.keySet()) {
 					Counter<S> f = trellis.getForwardTransitions(state);
 
-					if (debug) {
-						System.out.println("");
-						System.out.println("");
-						System.out.println(state);
-						System.out.println(f);
-						System.out.println("");
-						System.out.println("");
-					}
+					LOG.debug("");
+					LOG.debug("");
+					LOG.debug(state);
+					LOG.debug(f);
+					LOG.debug("");
+					LOG.debug("");
 
 					for (S st : f.keySet()) {
 						if (st.equals(endstate))
 							end = true;
 						Counter<S> bt = trellis.getBackwardTransitions(st);
 
-						if (debug)
-							System.out.println("Backward transitions for " + st + ": " + bt.toString());
+						LOG.debug("Backward transitions for " + st + ": " + bt.toString());
 
 						for (S k : bt.keySet()) {
 
-							if (debug) {
-								System.out.println(k);
-								System.out.println(s0.getCount(k));
-								System.out.println(f.getCount(st));
-							}
+							LOG.debug(k);
+							LOG.debug(s0.getCount(k));
+							LOG.debug(f.getCount(st));
 
 							bt.setCount(k, s0.getCount(k) + f.getCount(st));
 						}
@@ -360,20 +356,18 @@ public class POSTaggerTester {
 						s1.setCount(st, score);
 						b1.put(st, most_likely);
 
-						if (debug) {
-							System.out.println(most_likely);
-							System.out.println(score);
-						}
+						LOG.debug(most_likely);
+						LOG.debug(score);
 					}
 				}
 			} while (!end);
 
-			if (debug) {
+			if (LogLevel.DEBUG.isActive()) {
 				Integer j = 0;
 				for (HashMap<S, S> hm : backpointers) {
-					System.out.println("");
-					System.out.println("Token " + j.toString() + ":");
-					System.out.println(hm);
+					LOG.debug("");
+					LOG.debug("Token " + j.toString() + ":");
+					LOG.debug(hm);
 					j++;
 				}
 			}
@@ -382,18 +376,15 @@ public class POSTaggerTester {
 			S st = endstate;
 			ret.add(0, st);
 
-			if (debug)
-				System.out.println(st);
+			LOG.debug(st);
 
 			for (int i = backpointers.size() - 1; i >= 0; --i) {
 				st = backpointers.get(i).get(st);
-				if (debug)
-					System.out.println(st);
+				LOG.debug(st);
 				ret.add(0, st);
 			}
 
-			if (debug)
-				System.out.println(ret);
+			LOG.debug(ret);
 
 			return ret;
 		}
