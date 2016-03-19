@@ -1,12 +1,6 @@
 package edu.cornell.cs.nlp.assignments;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import edu.cornell.cs.nlp.assignments.counting.Counter;
 import edu.cornell.cs.nlp.assignments.counting.CounterMap;
@@ -131,6 +125,9 @@ public class POSTaggerTester {
 			trellisDecoder = new GreedyDecoder<State>();
 		}
 
+		if (argMap.containsKey("-debug")) {
+			LogLevel.setLogLevel(LogLevel.DEBUG);
+		}
 
 		// Train tagger
 		final POSTagger posTagger = new POSTagger(localTrigramScorer,
@@ -295,18 +292,103 @@ public class POSTaggerTester {
 
 		@Override
 		public List<S> getBestPath(Trellis<S> trellis) {
-			final List<S> states = new ArrayList<S>();
-			S currentState = trellis.getStartState();
-			states.add(currentState);
-			while (!currentState.equals(trellis.getEndState())) {
-				final Counter<S> transitions = trellis
-						.getForwardTransitions(currentState);
-				final S nextState = transitions.argMax();
-				states.add(nextState);
-				currentState = nextState;
+			final List<Counter<S>> states = new ArrayList<Counter<S>>();
+			final List<HashMap<S, S>> backpointers= new ArrayList<HashMap<S, S>>();
+
+			//First set of transitions is populated (counter is a map from S->Double
+			S startstate = trellis.getStartState();
+			S endstate = trellis.getEndState();
+
+			Counter<S> s0;
+			Counter<S> s1 = trellis.getForwardTransitions(startstate);
+			HashMap<S, S> b1 = new HashMap<S, S>();
+
+			states.add(s1);
+			backpointers.add(b1);
+
+
+		    LOG.debug("Start State: " + startstate.toString());
+			LOG.debug("End State: " + endstate.toString());
+			LOG.debug("Forward transitions: " + s1.toString());
+
+
+			for (S k : s1.keySet()) {
+				b1.put(k, startstate);
 			}
-			return states;
-		}			//TODO: IMPLEMENT ME
+
+			boolean end = false;
+
+			do {
+				s0 = s1;
+				s1 = new Counter<S>();
+				b1 = new HashMap<S, S>();
+				states.add(s1);
+				backpointers.add(b1);
+
+				for (S state : s0.keySet()) {
+					Counter<S> f = trellis.getForwardTransitions(state);
+
+					LOG.debug("");
+					LOG.debug("");
+					LOG.debug(state);
+					LOG.debug(f);
+					LOG.debug("");
+					LOG.debug("");
+
+					for (S st : f.keySet()) {
+						if (st.equals(endstate))
+							end = true;
+						Counter<S> bt = trellis.getBackwardTransitions(st);
+
+						LOG.debug("Backward transitions for " + st + ": " + bt.toString());
+
+						for (S k : bt.keySet()) {
+
+							LOG.debug(k);
+							LOG.debug(s0.getCount(k));
+							LOG.debug(f.getCount(st));
+
+							bt.setCount(k, s0.getCount(k) + f.getCount(st));
+						}
+
+						S most_likely = bt.argMax();
+						Double score = bt.getCount(most_likely);
+						s1.setCount(st, score);
+						b1.put(st, most_likely);
+
+						LOG.debug(most_likely);
+						LOG.debug(score);
+					}
+				}
+			} while (!end);
+
+			if (LogLevel.DEBUG.isActive()) {
+				Integer j = 0;
+				for (HashMap<S, S> hm : backpointers) {
+					LOG.debug("");
+					LOG.debug("Token " + j.toString() + ":");
+					LOG.debug(hm);
+					j++;
+				}
+			}
+
+			List<S> ret = new ArrayList<S>();
+			S st = endstate;
+			ret.add(0, st);
+
+			LOG.debug(st);
+
+			for (int i = backpointers.size() - 1; i >= 0; --i) {
+				st = backpointers.get(i).get(st);
+				LOG.debug(st);
+				ret.add(0, st);
+			}
+
+			LOG.debug(ret);
+
+			return ret;
+		}
+
 	}
 
 	/**
