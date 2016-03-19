@@ -577,6 +577,7 @@ public class POSTaggerTester {
 		public void train(
 				List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
 			// collect word-tag counts
+			// I like Sean, he is smart!!!
 			for (final LabeledLocalTrigramContext labeledLocalTrigramContext : labeledLocalTrigramContexts) {
 				final String word = labeledLocalTrigramContext.getCurrentWord();
 				final String tag = labeledLocalTrigramContext.getCurrentTag();
