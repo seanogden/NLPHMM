@@ -596,8 +596,8 @@ public class POSTaggerTester {
 				wordForthisTag.incrementCount(tag, word, 1.0);
 				TagsforBigrams.incrementCount(labeledLocalTrigramContext.getPreviousTag(), tag, 1.0);
 				TagsforTrigrams.incrementCount(makeBigramString(
-						labeledLocalTrigramContext.getPreviousTag(),
-						labeledLocalTrigramContext.getCurrentTag()), tag, 1.0);
+						labeledLocalTrigramContext.getPreviousPreviousTag(),
+						labeledLocalTrigramContext.getPreviousTag()), tag, 1.0);
 		        
 			}
 			wordsToTags = Counters.conditionalNormalize(wordsToTags);
