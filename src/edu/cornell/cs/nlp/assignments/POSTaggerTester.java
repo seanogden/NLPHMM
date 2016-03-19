@@ -575,6 +575,7 @@ public class POSTaggerTester {
 		
 		@Override
 		public void train(
+				//jac is stupid.
 				List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
 			// collect word-tag counts
 			// I like Sean, he is smart!!!
