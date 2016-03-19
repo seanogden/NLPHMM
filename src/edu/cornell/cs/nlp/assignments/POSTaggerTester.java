@@ -575,6 +575,7 @@ public class POSTaggerTester {
 		
 		@Override
 		public void train(
+				//Sean's comment!
 				List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
 			// collect word-tag counts
 			for (final LabeledLocalTrigramContext labeledLocalTrigramContext : labeledLocalTrigramContexts) {
