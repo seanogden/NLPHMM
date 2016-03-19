@@ -120,7 +120,7 @@ public class POSTaggerTester {
 
 		// Construct tagger components
 		if (argMap.containsKey("-hmm")){
-			localTrigramScorer = new HMMScorer(false);
+			localTrigramScorer = new HMMScorer(true);
 		} else {
 			localTrigramScorer = new MostFrequentTagScorer(false);
 		}
@@ -402,70 +402,91 @@ public class POSTaggerTester {
 	}
 
 	/**
-	 * The MostFrequentTagScorer gives each test word the tag it was seen with
-	 * most often in training (or the tag with the most seen word types if the
-	 * test word is unseen in training. This scorer actually does a little more
-	 * than its name claims -- if constructed with restrictTrigrams = true, it
-	 * will forbid illegal tag trigrams, otherwise it makes no use of tag
-	 * history
-	 * information whatsoever.
+	 * Above HMMScorer
 	 */
 	static class HMMScorer implements LocalTrigramScorer {
-		//TODO: Implement the actual HMM Scorer
+		// Implement the actual HMM Scorer
 
-		boolean						restrictTrigrams;									// if
-																						// true,
-																						// assign
-																						// log
-																						// score
-																						// of
-																						// Double.NEGATIVE_INFINITY
-																						// to
-																						// illegal
-																						// tag
-																						// trigrams.
+		boolean						restrictTrigrams;// if true assign log score of Double.NEGATIVE_INFINITY to illegal trigrams
 
+		Set<String>					seenTagBigrams  = new HashSet<String>();
 		Set<String>					seenTagTrigrams	= new HashSet<String>();
 		Counter<String>				unknownWordTags	= new Counter<String>();
+		
 		CounterMap<String, String>	wordsToTags		= new CounterMap<String, String>();
+		CounterMap<String, String>  wordForthisTag  = new CounterMap<String, String>(); //for calculating emission
+		CounterMap<String, String>  TagsforBigrams  = new CounterMap<String, String>();
+		CounterMap<String, String>  TagsforTrigrams  = new CounterMap<String, String>();
 
 		public HMMScorer(boolean restrictTrigrams) {
 			this.restrictTrigrams = restrictTrigrams;
 		}
-
+		
+	    private String makeBigramString(String previousTag, String currentTag) {
+	        return previousTag + " " + currentTag;
+	      }
+	    
 		private static String makeTrigramString(String previousPreviousTag,
 				String previousTag, String currentTag) {
 			return previousPreviousTag + " " + previousTag + " " + currentTag;
 		}
 
-		public int getHistorySize() {
-			return 2;
-		}
-
 		@Override
 		public Counter<String> getLogScoreCounter(
 				LocalTrigramContext localTrigramContext) {
+			// getLogScoreCounter() in HMMScorer is to get Counters containing below score for each test context
+			// log(P(t_i|t_{i-1},t_{i-2})*P(w_i|t_i))
+			
 			final int position = localTrigramContext.getPosition();
 			final String word = localTrigramContext.getWords().get(position);
+			
+			// if the word is known, get this word's tagCounter
 			Counter<String> tagCounter = unknownWordTags;
 			if (wordsToTags.keySet().contains(word)) {
-				tagCounter = wordsToTags.getCounter(word);
+				tagCounter = wordsToTags.getCounter(word);//for this given word, get TagCounter
 			}
-			final Set<String> allowedFollowingTags = allowedFollowingTags(
+			
+			Set<String> allowedFollowingTags = allowedFollowingTags(
 					tagCounter.keySet(),
 					localTrigramContext.getPreviousPreviousTag(),
 					localTrigramContext.getPreviousTag());
-			final Counter<String> logScoreCounter = new Counter<String>();
+			
+			Counter<String> logScoreCounter = new Counter<String>();
+			
+			//for every tag in tags, calculate logScore
 			for (final String tag : tagCounter.keySet()) {
-				final double logScore = Math.log(tagCounter.getCount(tag));
-				if (!restrictTrigrams || allowedFollowingTags.isEmpty()
-						|| allowedFollowingTags.contains(tag)) {
-					logScoreCounter.setCount(tag, logScore);
+				//final double logScore = Math.log(tagCounter.getCount(tag));
+				double logScore = 0.0;
+				if (!wordsToTags.keySet().contains(word)){ // unknown word, get tagCounter
+					logScore = Math.log(tagCounter.getCount(tag));
 				}
+				else { //for given this.word under this.tag
+				//Emission e(x|y) = the probability of the word being x given you attributed tag y.
+					double emissionCount = wordForthisTag.getCounter(tag).getCount(word);
+					double emissionProb = Math.log( (emissionCount != 0) ? emissionCount : Double.MIN_VALUE );
+					
+				
+					if (allowedFollowingTags.contains(tag)) {
+						double transCount = TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(),localTrigramContext.getPreviousTag()), tag);
+						double transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
+						logScore = Math.log(transProb * emissionProb);
+					}
+					else if (seenTagBigrams.contains(makeBigramString(localTrigramContext.getPreviousTag(),tag))) {
+						double transCount = TagsforBigrams.getCount(localTrigramContext.getPreviousTag(), tag);
+						double transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
+						logScore = Math.log(transProb * emissionProb);
+					}
+					else{
+						logScore = Math.log(tagCounter.getCount(tag) * emissionProb);
+					}
+				}
+				
+				logScoreCounter.setCount(tag, logScore);	
 			}
+			
 			return logScoreCounter;
 		}
-
+		
 		@Override
 		public void train(
 				List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
@@ -483,9 +504,21 @@ public class POSTaggerTester {
 						labeledLocalTrigramContext.getPreviousPreviousTag(),
 						labeledLocalTrigramContext.getPreviousTag(),
 						labeledLocalTrigramContext.getCurrentTag()));
+				seenTagBigrams.add(makeBigramString(
+						labeledLocalTrigramContext.getPreviousTag(),
+						labeledLocalTrigramContext.getCurrentTag()));
+				wordForthisTag.incrementCount(tag, word, 1.0);
+				TagsforBigrams.incrementCount(labeledLocalTrigramContext.getPreviousTag(), tag, 1.0);
+				TagsforTrigrams.incrementCount(makeBigramString(
+						labeledLocalTrigramContext.getPreviousTag(),
+						labeledLocalTrigramContext.getCurrentTag()), tag, 1.0);
+		        
 			}
 			wordsToTags = Counters.conditionalNormalize(wordsToTags);
+			wordForthisTag = Counters.conditionalNormalize(wordForthisTag);//for emission
 			unknownWordTags = Counters.normalize(unknownWordTags);
+			TagsforBigrams = Counters.conditionalNormalize(TagsforBigrams);
+			TagsforTrigrams = Counters.conditionalNormalize(TagsforTrigrams);
 		}
 
 		@Override
@@ -507,6 +540,7 @@ public class POSTaggerTester {
 			return allowedTags;
 		}
 	}
+	
 
 	/**
 	 * The MostFrequentTagScorer gives each test word the tag it was seen with
