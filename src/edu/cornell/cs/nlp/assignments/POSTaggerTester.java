@@ -546,21 +546,25 @@ public class POSTaggerTester {
 				//Emission e(x|y) = the probability of the word being x given you attributed tag y.
 					double emissionCount = wordForthisTag.getCounter(tag).getCount(word);
 					double emissionProb = Math.log( (emissionCount != 0) ? emissionCount : Double.MIN_VALUE );
+					double transProb;
 					
 				
 					if (allowedFollowingTags.contains(tag)) {
+						//TODO:  TagsForTrigrams will always return zero unless localTrigramContext.getPreviousTag().equal(tag)!!
+						//       Must be misunderstanding the meaning of TagsForTrigrams.
 						double transCount = TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(),localTrigramContext.getPreviousTag()), tag);
-						double transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
-						logScore = Math.log(transProb * emissionProb);
+						transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
 					}
 					else if (seenTagBigrams.contains(makeBigramString(localTrigramContext.getPreviousTag(),tag))) {
 						double transCount = TagsforBigrams.getCount(localTrigramContext.getPreviousTag(), tag);
-						double transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
-						logScore = Math.log(transProb * emissionProb);
+						transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
 					}
 					else{
-						logScore = Math.log(tagCounter.getCount(tag) * emissionProb);
+						transProb = Math.log(tagCounter.getCount(tag));
 					}
+
+					//both transProb and emissionProb are logs!
+					logScore = transProb + emissionProb;
 				}
 				
 				logScoreCounter.setCount(tag, logScore);	
