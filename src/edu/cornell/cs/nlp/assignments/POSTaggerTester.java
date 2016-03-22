@@ -335,26 +335,20 @@ public class POSTaggerTester {
 					LOG.debug("");
 					LOG.debug("");
 
-
 					for (S st : f.keySet()) {
 						if (st.equals(endstate))
 							end = true;
+						Counter<S> bt = trellis.getBackwardTransitions(st);
 
-						Counter<S> bt = new Counter<S>();
-						Counter<S> bt0 = trellis.getBackwardTransitions(st);
+						LOG.debug("Backward transitions for " + st + ": " + bt.toString());
 
-						LOG.debug("Backward transitions for " + st + ": " + trellis.getBackwardTransitions(st).toString());
-
-						for (S k : bt0.keySet()) {
+						for (S k : bt.keySet()) {
 
 							LOG.debug(k);
 							LOG.debug(s0.getCount(k));
-							LOG.debug(bt0.getCount(k));
+							LOG.debug(f.getCount(st));
 
-							double edgeProb = bt0.getCount(k);
-							double bestPathProb = s0.containsKey(k) ? s0.getCount(k) : Double.NEGATIVE_INFINITY;
-
-							bt.setCount(k, bestPathProb + edgeProb);
+							bt.setCount(k, s0.getCount(k) + f.getCount(st));
 						}
 
 						S most_likely = bt.argMax();
@@ -362,8 +356,6 @@ public class POSTaggerTester {
 						s1.setCount(st, score);
 						b1.put(st, most_likely);
 
-						LOG.debug("");
-						LOG.debug("Chose: ");
 						LOG.debug(most_likely);
 						LOG.debug(score);
 					}
@@ -514,7 +506,6 @@ public class POSTaggerTester {
 		//wordForthisTag.totalCount() is # of words in the training set
 		//wordForthisTag.size() is # of tags in the training set
 		CounterMap<String, String>  wordForthisTag  = new CounterMap<String, String>(); //for calculating emission
-		
 		CounterMap<String, String>  TagsforBigrams  = new CounterMap<String, String>();
 		CounterMap<String, String>  TagsforTrigrams  = new CounterMap<String, String>();
 		Counter<String> 			TagsforUnigrams = new Counter<String>();
@@ -552,7 +543,7 @@ public class POSTaggerTester {
 			double prob = 0;
 			for (int i = 0; i< recordLength; i++){
 				double recurProb = suffix.getCount(unknownWord.substring(unknownWord.length()-i), tag);		
-				prob = (recurProb + theta* prob)/(1+theta);
+				prob = (prob+ theta* recurProb)/(1 + theta);
 			}
 			
 			return prob;
@@ -672,10 +663,10 @@ public class POSTaggerTester {
 			TagsforTrigrams = Counters.conditionalNormalize(TagsforTrigrams);
 			suffix = Counters.conditionalNormalize(suffix);
 			
-			
 			//start to caculalte theta: set all theta_i to 
 			//the standard deviation of unconditioned max likelihood probs of the tags in the training dataset
 			//where the average is for all i = 0, ..., m-1, using a tagset of s tags and average it.
+			@SuppressWarnings("unused")
 			double trainWordsCount = wordForthisTag.totalCount();
 			double s = wordForthisTag.size();
 			
@@ -687,7 +678,7 @@ public class POSTaggerTester {
 				double tagCount = wordForthisTag.getCounter(tag).totalCount();
 				 avgP += tagCount;
 			}
-			avgP /= s;
+			//avgP /= s;
 			
 			//calculate theta
 			for (String tag: wordForthisTag.keySet()){
@@ -698,7 +689,9 @@ public class POSTaggerTester {
 			
 			System.out.println("theta " + theta);
 			
-			
+			System.out.println("# of words in the training set is " + wordForthisTag.totalCount() + ", and # of tags is " + wordForthisTag.size());
+
+
 			
 		}
 
@@ -732,15 +725,15 @@ public class POSTaggerTester {
 				double countT2 = wordForthisTag.getCounter(prevTag).totalCount();
 				double countT3 = wordForthisTag.getCounter(tag).totalCount();
 				
-				if (countT1T2T3 == 0) {
-					System.out.println("f(t_1, t_2, t_3) = 0");
-					break;
-				}
+//				if (countT1T2T3 == 0) {
+//					System.out.println("f(t_1, t_2, t_3) = 0");
+//					//break;
+//				}
 				
 				//case 1 (f(t_1, t_2, t_3) - 1) / (f(t_1, t_2) -1 )
 				double case1 = (countT1T2 == 1)? 0 : ((countT1T2T3 -1 )/(countT1T2-1));
 				//case 2 (f(t_2, t_3) - 1) / (f(t_2) -1 )
-				double case2 = (countT2 == 1)? 0 : ((countT2T3-1)/(countT2)-1);
+				double case2 = (countT2 == 1)? 0 : ((countT2T3-1)/(countT2-1));
 				//case 3 = (f(t_3) - 1) / (N-1 )
 				double case3 = (N == 1)?0:((countT3 -1 )/(N - 1));
 				
@@ -778,6 +771,10 @@ public class POSTaggerTester {
 			lambda2 /= normLambda;
 			lambda3 /= normLambda;
 			
+			System.out.println(lambda1);
+			System.out.println(lambda2);
+			System.out.println(lambda3);
+			
 			return new double[]{lambda1, lambda2, lambda3};
 		}
 		
@@ -795,6 +792,7 @@ public class POSTaggerTester {
 			return allowedTags;
 		}
 
+		
 	}
 	
 
