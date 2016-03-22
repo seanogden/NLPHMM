@@ -335,20 +335,26 @@ public class POSTaggerTester {
 					LOG.debug("");
 					LOG.debug("");
 
+
 					for (S st : f.keySet()) {
 						if (st.equals(endstate))
 							end = true;
-						Counter<S> bt = trellis.getBackwardTransitions(st);
 
-						LOG.debug("Backward transitions for " + st + ": " + bt.toString());
+						Counter<S> bt = new Counter<S>();
+						Counter<S> bt0 = trellis.getBackwardTransitions(st);
 
-						for (S k : bt.keySet()) {
+						LOG.debug("Backward transitions for " + st + ": " + trellis.getBackwardTransitions(st).toString());
+
+						for (S k : bt0.keySet()) {
 
 							LOG.debug(k);
 							LOG.debug(s0.getCount(k));
-							LOG.debug(f.getCount(st));
+							LOG.debug(bt0.getCount(k));
 
-							bt.setCount(k, s0.getCount(k) + f.getCount(st));
+							double edgeProb = bt0.getCount(k);
+							double bestPathProb = s0.containsKey(k) ? s0.getCount(k) : Double.NEGATIVE_INFINITY;
+
+							bt.setCount(k, bestPathProb + edgeProb);
 						}
 
 						S most_likely = bt.argMax();
@@ -356,6 +362,8 @@ public class POSTaggerTester {
 						s1.setCount(st, score);
 						b1.put(st, most_likely);
 
+						LOG.debug("");
+						LOG.debug("Chose: ");
 						LOG.debug(most_likely);
 						LOG.debug(score);
 					}
