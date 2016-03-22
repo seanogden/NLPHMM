@@ -418,8 +418,7 @@ public class POSTaggerTester {
 
 	/**
 	 * A LocalTrigramContext is a position in a sentence, along with the
-	 * previous
-	 * two tags -- basically a FeatureVector.
+	 * previous two tags -- basically a FeatureVector.
 	 */
 	static class LocalTrigramContext {
 		int				position;
@@ -488,18 +487,32 @@ public class POSTaggerTester {
 	 */
 	static class HMMScorer implements LocalTrigramScorer {
 		// Implement the actual HMM Scorer
+		//  Below solution reference : https://code.google.com/archive/p/chunming-nlp/source/default/source
+		// and <TnT — A Statistical Part-of-Speech Tagger> 
 
 		boolean						restrictTrigrams;// if true assign log score of Double.NEGATIVE_INFINITY to illegal trigrams
-
+		double[] 					lambdas;
+		double 						theta = 0;
+		final int 					LONGESTSUFFIX = 10;
+		final int					THRESHOLDFREQ = 10;
+		Set<String>					unknownWords 	= new HashSet<String>();
+		Set<String>					seenTagUnigrams  = new HashSet<String>();
 		Set<String>					seenTagBigrams  = new HashSet<String>();
 		Set<String>					seenTagTrigrams	= new HashSet<String>();
 		Counter<String>				unknownWordTags	= new Counter<String>();
 		
 		CounterMap<String, String>	wordsToTags		= new CounterMap<String, String>();
+		
+		//wordForthisTag.totalCount() is # of words in the training set
+		//wordForthisTag.size() is # of tags in the training set
 		CounterMap<String, String>  wordForthisTag  = new CounterMap<String, String>(); //for calculating emission
+		
 		CounterMap<String, String>  TagsforBigrams  = new CounterMap<String, String>();
 		CounterMap<String, String>  TagsforTrigrams  = new CounterMap<String, String>();
-
+		Counter<String> 			TagsforUnigrams = new Counter<String>();
+		
+		CounterMap<String, String>  suffix = new CounterMap<String, String>();
+		
 		public HMMScorer(boolean restrictTrigrams) {
 			this.restrictTrigrams = restrictTrigrams;
 		}
@@ -512,7 +525,32 @@ public class POSTaggerTester {
 				String previousTag, String currentTag) {
 			return previousPreviousTag + " " + previousTag + " " + currentTag;
 		}
+		
+		//handling of unknown words
+		private double unknownProbability(String tag, String unknownWord){
 
+			//last m letters, which depends on the word in question.
+			//We use the longest suffix that we can find in the training set, at most 10 chars
+			int m = 0;
+			for (int i = 0; i < unknownWord.length(); i++){
+				if (suffix.containsKey(unknownWord.substring(i))){
+					// the last i-1 chars stored in suffix
+					m  = unknownWord.length() - i ;			
+				}
+			}
+			
+			int recordLength = Math.min(m, LONGESTSUFFIX);
+			
+			double prob = 0;
+			for (int i = 0; i< recordLength; i++){
+				double recurProb = suffix.getCount(unknownWord.substring(unknownWord.length()-i), tag);		
+				prob = (recurProb + theta* prob)/(1+theta);
+			}
+			
+			return prob;
+		}
+		
+		
 		@Override
 		public Counter<String> getLogScoreCounter(
 				LocalTrigramContext localTrigramContext) {
@@ -539,8 +577,18 @@ public class POSTaggerTester {
 			for (final String tag : tagCounter.keySet()) {
 				//final double logScore = Math.log(tagCounter.getCount(tag));
 				double logScore = 0.0;
+				double unknownProb = 0.0;
 				if (!wordsToTags.keySet().contains(word)){ // unknown word, get tagCounter
-					logScore = Math.log(tagCounter.getCount(tag));
+					//logScore = Math.log(tagCounter.getCount(tag));
+					unknownProb = unknownProbability(tag, word);
+					double smooth = lambdas[0]*TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(), localTrigramContext.getPreviousTag()), tag)
+							+ lambdas[1]*TagsforBigrams.getCount(localTrigramContext.previousTag, tag)
+							+ lambdas[2]*TagsforUnigrams.getCount(tag);
+					
+					logScore = Math.log(unknownProb * smooth);
+					if ( (unknownProb * smooth == 0) && (!unknownWords.contains(word))){
+						unknownWords.add(word);
+					}
 				}
 				else { //for given this.word under this.tag
 				//Emission e(x|y) = the probability of the word being x given you attributed tag y.
@@ -551,7 +599,6 @@ public class POSTaggerTester {
 				
 					if (allowedFollowingTags.contains(tag)) {
 						//TODO:  TagsForTrigrams will always return zero unless localTrigramContext.getPreviousTag().equal(tag)!!
-						//       Must be misunderstanding the meaning of TagsForTrigrams.
 						double transCount = TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(),localTrigramContext.getPreviousTag()), tag);
 						transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
 					}
@@ -593,26 +640,140 @@ public class POSTaggerTester {
 				seenTagBigrams.add(makeBigramString(
 						labeledLocalTrigramContext.getPreviousTag(),
 						labeledLocalTrigramContext.getCurrentTag()));
+
 				wordForthisTag.incrementCount(tag, word, 1.0);
+				TagsforUnigrams.incrementCount(tag, 1.0);
 				TagsforBigrams.incrementCount(labeledLocalTrigramContext.getPreviousTag(), tag, 1.0);
 				TagsforTrigrams.incrementCount(makeBigramString(
 						labeledLocalTrigramContext.getPreviousPreviousTag(),
 						labeledLocalTrigramContext.getPreviousTag()), tag, 1.0);
+				
+				// for this word, record all possible suffix, until len(suffix) or len(suffix)>10
+				int recordLength = Math.min(word.length(), LONGESTSUFFIX);
+				for (int i = 0 ; i < recordLength; i++){
+					suffix.incrementCount(word.substring(recordLength-i), tag, 1.0);
+				}
 		        
 			}
+			
 			wordsToTags = Counters.conditionalNormalize(wordsToTags);
 			wordForthisTag = Counters.conditionalNormalize(wordForthisTag);//for emission
 			unknownWordTags = Counters.normalize(unknownWordTags);
+			TagsforUnigrams = Counters.normalize(TagsforUnigrams);
 			TagsforBigrams = Counters.conditionalNormalize(TagsforBigrams);
 			TagsforTrigrams = Counters.conditionalNormalize(TagsforTrigrams);
+			suffix = Counters.conditionalNormalize(suffix);
+			
+			
+			//start to caculalte theta: set all theta_i to 
+			//the standard deviation of unconditioned max likelihood probs of the tags in the training dataset
+			//where the average is for all i = 0, ..., m-1, using a tagset of s tags and average it.
+			double trainWordsCount = wordForthisTag.totalCount();
+			double s = wordForthisTag.size();
+			
+			double theta = 0.0;
+			
+			//calculate average P
+			double avgP = 0.0;
+			for (String tag : wordForthisTag.keySet()) {
+				double tagCount = wordForthisTag.getCounter(tag).totalCount();
+				 avgP += tagCount;
+			}
+			avgP /= s;
+			
+			//calculate theta
+			for (String tag: wordForthisTag.keySet()){
+				double tagCount = wordForthisTag.getCounter(tag).totalCount();
+				theta += Math.pow( (tagCount - avgP), 2);
+			}		
+			theta /= (s - 1.0);
+			
+			System.out.println("theta " + theta);
+			
+			
+			
 		}
 
 		@Override
 		public void validate(
 				List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
 			// no tuning for this dummy model!
+			// tunning from lambdaInterpolation method
+			lambdas = lambdaInterpolation(labeledLocalTrigramContexts);
 		}
-
+		
+		
+		// "the values of lambda are estimated by deleted interpolation"
+		private double[] lambdaInterpolation(List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
+			
+			double N = wordsToTags.totalCount();
+			double lambda1 = 0, lambda2 = 0, lambda3 = 0;
+			
+			
+			for (LabeledLocalTrigramContext labeledLocalTrigramContext: labeledLocalTrigramContexts) {
+				//caclualte count, which is f(t_1, t_2, t_3)
+				String tag = labeledLocalTrigramContext.getCurrentTag();
+				String prevTag = labeledLocalTrigramContext.previousTag;
+				String prevPrevTag = labeledLocalTrigramContext.previousPreviousTag;
+				String prevTags = makeBigramString(prevPrevTag, prevTag);
+				String currTags = makeBigramString(prevTag, tag);
+				
+				double countT1T2T3 = TagsforTrigrams.getCount(prevTags, tag);
+				double countT1T2 = TagsforTrigrams.getCounter(prevTags).totalCount(); //(f(t_1, t_2)
+				double countT2T3 = TagsforTrigrams.getCounter(currTags).totalCount();
+				double countT2 = wordForthisTag.getCounter(prevTag).totalCount();
+				double countT3 = wordForthisTag.getCounter(tag).totalCount();
+				
+				if (countT1T2T3 == 0) {
+					System.out.println("f(t_1, t_2, t_3) = 0");
+					break;
+				}
+				
+				//case 1 (f(t_1, t_2, t_3) - 1) / (f(t_1, t_2) -1 )
+				double case1 = (countT1T2 == 1)? 0 : ((countT1T2T3 -1 )/(countT1T2-1));
+				//case 2 (f(t_2, t_3) - 1) / (f(t_2) -1 )
+				double case2 = (countT2 == 1)? 0 : ((countT2T3-1)/(countT2)-1);
+				//case 3 = (f(t_3) - 1) / (N-1 )
+				double case3 = (N == 1)?0:((countT3 -1 )/(N - 1));
+				
+				// find the max from 3 cases
+				double maxCase = Math.max(case1, Math.max(case2,case3));
+				
+				//create a hashmap for later switch case
+			    HashMap<Double,Integer> caseMap = new HashMap<Double,Integer>();
+			    caseMap.put(case1,1);
+			    caseMap.put(case2,2);
+			    caseMap.put(case3,3);
+			    
+			    int switchKey = caseMap.get(maxCase);
+			    
+			    switch (switchKey) {
+				case 1: { // case 1 is the max, increase lambda3
+				    lambda3 += countT1T2T3;
+				    break;
+					}
+				case 2:{
+				    lambda2 += countT1T2T3;
+				    break;
+					}
+				case 3: {
+				    lambda1 += countT1T2T3;
+				    break;
+					}
+			    }
+			    	
+			}
+			
+			//normalize to sum to 1
+			double normLambda = lambda1 + lambda2 + lambda3;
+			lambda1 /= normLambda;
+			lambda2 /= normLambda;
+			lambda3 /= normLambda;
+			
+			return new double[]{lambda1, lambda2, lambda3};
+		}
+		
+		
 		private Set<String> allowedFollowingTags(Set<String> tags,
 				String previousPreviousTag, String previousTag) {
 			final Set<String> allowedTags = new HashSet<String>();
@@ -625,6 +786,7 @@ public class POSTaggerTester {
 			}
 			return allowedTags;
 		}
+
 	}
 	
 
