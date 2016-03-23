@@ -537,10 +537,11 @@ public class POSTaggerTester {
 		private double unknownProbability(String tag, String unknownWord){
 
 			int m = 0;
-			int suffixmax = Math.min(unknownWord.length(), LONGESTSUFFIX);
+			int len = unknownWord.length();
+			int suffixmax = Math.min(len, LONGESTSUFFIX);
 
 			for (int i = 1; i <= suffixmax; ++i) {
-				if (suffix.containsKey(unknownWord.substring(i))) {
+				if (suffix.containsKey(unknownWord.substring(len - i))) {
 					m = i;
 				}
 			}
@@ -549,14 +550,14 @@ public class POSTaggerTester {
 			double p0 = TagsforUnigrams.getCount(tag);
 
 			for (int i = 1; i <= m; i++){
-				double p1 = suffix.getCount(unknownWord.substring(i), tag);
+				double p1 = suffix.getCount(unknownWord.substring(len - i), tag);
 
 				//P(t, i+1) = p^(t,i+1) + theta * P(t,i)
 				p0 = (p1 + theta* p0)/(1.0 + theta);
 			}
 
-			p0*=countForSuffix.getCount(unknownWord.substring(m))/suffixcount[m];
-			p0/=TagsforUnigrams.getCount(tag);
+			//p0*=countForSuffix.getCount(unknownWord.substring(m))/suffixcount[m];
+			//p0/=TagsforUnigrams.getCount(tag);
 			
 			return p0;
 		}
@@ -602,13 +603,12 @@ public class POSTaggerTester {
 
 				//Emission e(x|y) = the probability of the word being x given you attributed tag y.
 				double emissionProb = Math.log( (emissionCount != 0) ? emissionCount : Double.MIN_VALUE );
-				/*
-				double transProb = Math.log(
+
+				/*double transProb = Math.log(
 						lambdas[0]*TagsforUnigrams.getCount(tag) )
 				        + lambdas[1]*TagsforBigrams.getCount(localTrigramContext.previousTag, tag)
 						+ lambdas[2]*TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(),
-																			 localTrigramContext.getPreviousTag()), tag);
-				*/
+																			 localTrigramContext.getPreviousTag()), tag);*/
 
 				double transProb = 0.0;
 				if(TagsforTrigrams.containsKey(tag))
@@ -618,13 +618,14 @@ public class POSTaggerTester {
 					transProb = TagsforBigrams.getCount(localTrigramContext.getPreviousTag(), tag);
 				else
 					transProb = TagsforUnigrams.getCount(tag);
+				transProb = Math.log(transProb);
 
 
 				//both transProb and emissionProb are logs!
 				//if (!wordsToTags.keySet().contains(word)) { // unknown word
 				//	logScore = Math.log(tagCounter.getCount(tag));
 				//} else {
-					logScore = Math.log(transProb) + emissionProb;
+					logScore = transProb + emissionProb;
 				//}
 
 
@@ -669,10 +670,11 @@ public class POSTaggerTester {
 						labeledLocalTrigramContext.getPreviousTag()), tag, 1.0);
 				
 				// for this word, record all possible suffix, until len(suffix) or len(suffix)>10
-				int recordLength = Math.min(word.length(), LONGESTSUFFIX);
+				int len = word.length();
+				int recordLength = Math.min(len, LONGESTSUFFIX);
 				for (int i = 1 ; i <= recordLength; i++){
-					countForSuffix.incrementCount(word.substring(i), 1.0);
-					suffix.incrementCount(word.substring(i), tag, 1.0);
+					countForSuffix.incrementCount(word.substring(len - i), 1.0);
+					suffix.incrementCount(word.substring(len - i), tag, 1.0);
 					suffixcount[i]++;
 				}
 		        
@@ -685,6 +687,14 @@ public class POSTaggerTester {
 			@SuppressWarnings("unused")
 			double trainWordsCount = wordForthisTag.totalCount();
 
+			wordsToTags = Counters.conditionalNormalize(wordsToTags);
+			wordForthisTag = Counters.conditionalNormalize(wordForthisTag);//for emission
+			unknownWordTags = Counters.normalize(unknownWordTags);
+			TagsforUnigrams = Counters.normalize(TagsforUnigrams);
+			TagsforBigrams = Counters.conditionalNormalize(TagsforBigrams);
+			TagsforTrigrams = Counters.conditionalNormalize(TagsforTrigrams);
+			suffix = Counters.conditionalNormalize(suffix);
+
 			theta = 0.0;
 
 			double s = TagsforUnigrams.size();
@@ -695,20 +705,12 @@ public class POSTaggerTester {
 			for (String t : TagsforUnigrams.keySet()){
 				double tagCount = TagsforUnigrams.getCount(t);
 				theta += (tagCount - avgP)*(tagCount - avgP);
-			}		
+			}
 			theta /= (s - 1.0);
 
 			System.out.println("theta " + theta);
-			
+
 			System.out.println("# of words in the training set is " + wordForthisTag.totalCount() + ", and # of tags is " + wordForthisTag.size());
-			
-			wordsToTags = Counters.conditionalNormalize(wordsToTags);
-			wordForthisTag = Counters.conditionalNormalize(wordForthisTag);//for emission
-			unknownWordTags = Counters.normalize(unknownWordTags);
-			TagsforUnigrams = Counters.normalize(TagsforUnigrams);
-			TagsforBigrams = Counters.conditionalNormalize(TagsforBigrams);
-			TagsforTrigrams = Counters.conditionalNormalize(TagsforTrigrams);
-			suffix = Counters.conditionalNormalize(suffix);
 
 			
 		}
