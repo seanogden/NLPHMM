@@ -668,25 +668,20 @@ public class POSTaggerTester {
 			//where the average is for all i = 0, ..., m-1, using a tagset of s tags and average it.
 			@SuppressWarnings("unused")
 			double trainWordsCount = wordForthisTag.totalCount();
-			double s = wordForthisTag.size();
-			
+
 			double theta = 0.0;
-			
+
+			double s = TagsforUnigrams.size();
 			//calculate average P
-			double avgP = 0.0;
-			for (String tag : wordForthisTag.keySet()) {
-				double tagCount = wordForthisTag.getCounter(tag).totalCount();
-				 avgP += tagCount;
-			}
-			//avgP /= s;
-			
+			double avgP = 1.0/s;
+
 			//calculate theta
-			for (String tag: wordForthisTag.keySet()){
-				double tagCount = wordForthisTag.getCounter(tag).totalCount();
-				theta += Math.pow( (tagCount - avgP), 2);
+			for (String t : TagsforUnigrams.keySet()){
+				double tagCount = TagsforUnigrams.getCount(t);
+				theta += (tagCount - avgP)*(tagCount - avgP);
 			}		
 			theta /= (s - 1.0);
-			
+
 			System.out.println("theta " + theta);
 			
 			System.out.println("# of words in the training set is " + wordForthisTag.totalCount() + ", and # of tags is " + wordForthisTag.size());
