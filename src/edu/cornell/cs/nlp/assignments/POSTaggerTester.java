@@ -513,6 +513,8 @@ public class POSTaggerTester {
 		Counter<String> 			TagsforUnigrams = new Counter<String>();
 		
 		CounterMap<String, String>  suffix = new CounterMap<String, String>();
+		Counter<String>  countForSuffix = new Counter<String>();
+		int[] suffixcount = new int[LONGESTSUFFIX + 1];
 		
 		public HMMScorer(boolean restrictTrigrams) {
 			this.restrictTrigrams = restrictTrigrams;
@@ -534,26 +536,29 @@ public class POSTaggerTester {
 		//handling of unknown words
 		private double unknownProbability(String tag, String unknownWord){
 
-			//last m letters, which depends on the word in question.
-			//We use the longest suffix that we can find in the training set, at most 10 chars
-			int m = 0; // longest word in question
-			for (int i = 0; i < unknownWord.length(); i++){
-				if (suffix.containsKey(unknownWord.substring(i))){
-					// the last i-1 chars stored in suffix
-					m  = i ;
-					break;
+			int m = 0;
+			int suffixmax = Math.min(unknownWord.length(), LONGESTSUFFIX);
+
+			for (int i = 1; i <= suffixmax; ++i) {
+				if (suffix.containsKey(unknownWord.substring(i))) {
+					m = i;
 				}
 			}
-			
-			int recordLength = Math.min((unknownWord.length()-m), LONGESTSUFFIX);
-			
-			double prob = 0;
-			for (int i = 0; i< recordLength; i++){
-				double recurProb = suffix.getCount(unknownWord.substring(unknownWord.length()-i), tag);		
-				prob = (prob+ theta* recurProb)/(1 + theta);
+
+			//P(t) = P^(t)
+			double p0 = TagsforUnigrams.getCount(tag);
+
+			for (int i = 1; i <= m; i++){
+				double p1 = suffix.getCount(unknownWord.substring(i), tag);
+
+				//P(t, i+1) = p^(t,i+1) + theta * P(t,i)
+				p0 = (p1 + theta* p0)/(1.0 + theta);
 			}
+
+			p0*=countForSuffix.getCount(unknownWord.substring(m))/suffixcount[m];
+			p0/=TagsforUnigrams.getCount(tag);
 			
-			return prob;
+			return p0;
 		}
 		
 		
@@ -587,50 +592,51 @@ public class POSTaggerTester {
 				
 				//smooth should be applied to all words, not only unknown words
 				//lambdas = lambdaInterpolation(labeledLocalTrigramContexts);
-				double smooth = Math.log(
-						lambdas[0]*TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(), localTrigramContext.getPreviousTag()), tag)
-						+ lambdas[1]*TagsforBigrams.getCount(localTrigramContext.previousTag, tag)
-						+ lambdas[2]*TagsforUnigrams.getCount(tag) );
-				
-				
-				if (!wordsToTags.keySet().contains(word)){ // unknown word
-					//logScore = Math.log(tagCounter.getCount(tag));
-					unknownProb = unknownProbability(tag, word);
-					
-     				logScore = Math.log(unknownProb * smooth);
-					if ( (unknownProb * smooth == 0) && (!unknownWords.contains(word))){
-						unknownWords.add(word);
-					}
-				}
-				else { //for given this.word under this.tag
-				//Emission e(x|y) = the probability of the word being x given you attributed tag y.
-					double emissionCount = wordForthisTag.getCounter(tag).getCount(word);
-					double emissionProb = Math.log( (emissionCount != 0) ? emissionCount : Double.MIN_VALUE );
-					double transProb;
-					
-				
-					if (allowedFollowingTags.contains(tag)) {
-						//TODO:  TagsForTrigrams will always return zero unless localTrigramContext.getPreviousTag().equal(tag)!!
-						double transCount = TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(),localTrigramContext.getPreviousTag()), tag);
-						transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
-					}
-					else if (seenTagBigrams.contains(makeBigramString(localTrigramContext.getPreviousTag(),tag))) {
-						double transCount = TagsforBigrams.getCount(localTrigramContext.getPreviousTag(), tag);
-						transProb = Math.log( (transCount != 0) ? transCount : Double.MIN_VALUE );
-					}
-					else{
-						transProb = Math.log(tagCounter.getCount(tag));
-					}
 
-					//both transProb and emissionProb are logs!
-					logScore = smooth + (transProb + emissionProb);
+				double emissionCount;
+				if (!wordsToTags.keySet().contains(word)){ // unknown word
+					emissionCount = unknownProbability(tag, word);
+				} else {
+					emissionCount = wordForthisTag.getCounter(tag).getCount(word);
 				}
+
+				//Emission e(x|y) = the probability of the word being x given you attributed tag y.
+				double emissionProb = Math.log( (emissionCount != 0) ? emissionCount : Double.MIN_VALUE );
+				/*
+				double transProb = Math.log(
+						lambdas[0]*TagsforUnigrams.getCount(tag) )
+				        + lambdas[1]*TagsforBigrams.getCount(localTrigramContext.previousTag, tag)
+						+ lambdas[2]*TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(),
+																			 localTrigramContext.getPreviousTag()), tag);
+				*/
+
+				double transProb = 0.0;
+				if(TagsforTrigrams.containsKey(tag))
+					transProb = TagsforTrigrams.getCount(makeBigramString(localTrigramContext.getPreviousPreviousTag(),
+																		  localTrigramContext.getPreviousTag()), tag);
+				else if (TagsforBigrams.containsKey(tag))
+					transProb = TagsforBigrams.getCount(localTrigramContext.getPreviousTag(), tag);
+				else
+					transProb = TagsforUnigrams.getCount(tag);
+
+
+				//both transProb and emissionProb are logs!
+				//if (!wordsToTags.keySet().contains(word)) { // unknown word
+				//	logScore = Math.log(tagCounter.getCount(tag));
+				//} else {
+					logScore = Math.log(transProb) + emissionProb;
+				//}
+
+
+				logScoreCounter.setCount(tag, logScore);
+				/*
 				if (!restrictTrigrams || allowedFollowingTags.isEmpty()
 						|| allowedFollowingTags.contains(tag)) {
 					logScoreCounter.setCount(tag, logScore);
-				}	
+				}
+				*/
 			}
-			
+
 			return logScoreCounter;
 		}
 		
@@ -664,8 +670,10 @@ public class POSTaggerTester {
 				
 				// for this word, record all possible suffix, until len(suffix) or len(suffix)>10
 				int recordLength = Math.min(word.length(), LONGESTSUFFIX);
-				for (int i = 0 ; i < recordLength; i++){
-					suffix.incrementCount(word.substring(recordLength-i), tag, 1.0);
+				for (int i = 1 ; i <= recordLength; i++){
+					countForSuffix.incrementCount(word.substring(i), 1.0);
+					suffix.incrementCount(word.substring(i), tag, 1.0);
+					suffixcount[i]++;
 				}
 		        
 			}
@@ -677,7 +685,7 @@ public class POSTaggerTester {
 			@SuppressWarnings("unused")
 			double trainWordsCount = wordForthisTag.totalCount();
 
-			double theta = 0.0;
+			theta = 0.0;
 
 			double s = TagsforUnigrams.size();
 			//calculate average P
