@@ -5,6 +5,7 @@ import java.util.*;
 import edu.cornell.cs.nlp.assignments.counting.Counter;
 import edu.cornell.cs.nlp.assignments.counting.CounterMap;
 import edu.cornell.cs.nlp.assignments.counting.Counters;
+import edu.cornell.cs.nlp.assignments.counting.Pair;
 import edu.cornell.cs.nlp.util.CommandLineUtils;
 import edu.cornell.cs.nlp.util.io.PennTreebankReader;
 import edu.cornell.cs.nlp.util.ling.Tree;
@@ -199,6 +200,11 @@ public class POSTaggerTester {
 		double numUnknownWords = 0.0;
 		double numUnknownWordsCorrect = 0.0;
 		int numDecodingInversions = 0;
+
+		Counter<Pair<String, String>> confusionMatrixCount = new Counter<Pair<String,String>>();
+		List<Pair<String, String>> confusedTags = new ArrayList<Pair<String, String>>();
+		Set<String> labelSet = new HashSet<String>();
+
 		for (final TaggedSentence taggedSentence : taggedSentences) {
 			final List<String> words = taggedSentence.getWords();
 			final List<String> goldTags = taggedSentence.getTags();
@@ -207,6 +213,9 @@ public class POSTaggerTester {
 				final String word = words.get(position);
 				final String goldTag = goldTags.get(position);
 				final String guessedTag = guessedTags.get(position);
+
+				labelSet.add(goldTag);
+
 				if (guessedTag.equals(goldTag)) {
 					numTagsCorrect += 1.0;
 				}
@@ -217,6 +226,8 @@ public class POSTaggerTester {
 					}
 					numUnknownWords += 1.0;
 				}
+
+				confusionMatrixCount.incrementCount(Pair.makePair(goldTag, guessedTag), 1.0);
 			}
 			final double scoreOfGoldTagging = posTagger
 					.scoreTagging(taggedSentence);
@@ -229,18 +240,99 @@ public class POSTaggerTester {
 							"WARNING: Decoder suboptimality detected.  Gold tagging has higher score than guessed tagging.");
 				}
 			}
+
+
 			if (verbose) {
 				System.out.println(
 						alignedTaggings(words, goldTags, guessedTags, true)
 								+ "\n");
 			}
+
 		}
 		System.out.println("Tag Accuracy: " + numTagsCorrect / numTags
 				+ " (Unknown Accuracy: "
 				+ numUnknownWordsCorrect / numUnknownWords
 				+ ")  Decoder Suboptimalities Detected: "
 				+ numDecodingInversions);
+
+		for (String s0 : labelSet) {
+			for (String s1 : labelSet) {
+				Pair<String, String> tagPair = Pair.makePair(s0, s1);
+				confusedTags.add(tagPair);
+			}
+		}
+
+		int i, j;
+		int cell = 0;
+		int n = labelSet.size();
+		double[][] confusionMatrixArray = new double[n][n];
+
+		for (Pair<String, String> tagPair : confusedTags) {
+			i = cell % n;
+			j = cell / n;
+			confusionMatrixArray[i][j] = confusionMatrixCount.getCount(tagPair);
+			cell++;
+		}
+
+		printConfusionMatrix(confusedTags, confusionMatrixArray, n);
 	}
+
+	private static void printConfusionMatrix(List<Pair<String, String>> confusionLabelPairs, double[][] confusionMatrixArray, int numLabels) {
+		int[] labelTotal = new int[numLabels];
+
+		for (int t = 0; t < numLabels; t++) {
+			for (int i = 0; i < numLabels; i++) {
+				labelTotal[t] += confusionMatrixArray[t][i];
+			}
+		}
+
+		Character[] goldchars = new Character[numLabels];
+		goldchars[0] = 'G';
+		goldchars[1] = 'O';
+		goldchars[2] = 'L';
+		goldchars[3] = 'D';
+
+
+
+		System.out.println("\t\t\t\t\tPredictions");
+		System.out.print("\t");
+		for (int i = 0; i < numLabels; i++) {
+			System.out.print("\t\t" + confusionLabelPairs.get(i * numLabels).getFirst());
+		}
+		System.out.println();
+		for (int j = 0; j < numLabels; j++) {
+			System.out.print(goldchars[j] + "\t" + confusionLabelPairs.get(j).getSecond() + "\t\t");
+			for (int k = 0; k < numLabels; k++) {
+				double labelCount = confusionMatrixArray[j][k] / labelTotal[k];
+				System.out.print(String.format("%.3f", labelCount) + "\t\t");
+			}
+			System.out.println();
+		}
+
+		System.out.println("\t\t\t\t\tPredictions");
+		System.out.print("\t");
+		for (int i = 0; i < numLabels; i++) {
+			System.out.print("\t\t" + confusionLabelPairs.get(i * numLabels).getFirst());
+		}
+		System.out.println();
+		for (int j = 0; j < numLabels; j++) {
+			System.out.print(goldchars[j] + "\t" + confusionLabelPairs.get(j).getSecond() + "\t\t");
+			for (int k = 0; k < numLabels; k++) {
+				double labelCount = confusionMatrixArray[j][k];
+				System.out.print((int) labelCount + "\t\t");
+			}
+			System.out.println();
+		}
+
+		double[] rowArray = new double[numLabels];
+		for (int j = 0; j < numLabels; j++) {
+			for (int m = 0; m < numLabels; m++) {
+				rowArray[m] += confusionMatrixArray[j][m];
+			}
+		}
+		System.out.println("\n" + Arrays.toString(rowArray));
+	}
+
 
 	private static Set<String> extractVocabulary(
 			List<TaggedSentence> taggedSentences) {
@@ -571,6 +663,12 @@ public class POSTaggerTester {
 			
 			final int position = localTrigramContext.getPosition();
 			final String word = localTrigramContext.getWords().get(position);
+
+			if (Character.isUpperCase(word.charAt(0)) && position > 0) {
+				Counter<String> ret = new Counter<String>();
+				ret.setCount("NNP", Math.log(1.0));
+				return ret;
+			}
 			
 			// if the word is known, get this word's tagCounter
 			Counter<String> tagCounter = unknownWordTags;
@@ -733,7 +831,7 @@ public class POSTaggerTester {
 		
 		// "the values of lambda are estimated by deleted interpolation"
 		private double[] lambdaInterpolation(List<LabeledLocalTrigramContext> labeledLocalTrigramContexts) {
-			
+
 			double N = wordsToTags.totalCount();
 			System.out.println("N is " + N);
 			double lambda1 = 0, lambda2 = 0, lambda3 = 0;
